@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!-- StudentHub Learning Progress Dashboard - landing page. -->
+<!-- Pure navigation: sends people to the student side or the admin side. No JavaScript, no data access. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StudentHub</title>
+<style>
+  /* Design tokens (dark theme). Same values are used in student.html and admin.html. */
+  :root{
+    --bg:#0f1115; --panel:#171a21; --border:#2a2e38; --text:#e8e9ec;
+    --muted:#8b8f9a; --accent:#5b8def;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); min-height:100vh;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .wrap{max-width:420px; padding:20px; text-align:center;}
+  h1{font-size:1.6rem; margin:0 0 6px;}
+  .sub{color:var(--muted); font-size:0.95rem; margin-bottom:32px;}
+  /* Each choice is a link styled as a card, so it works with no JavaScript. */
+  a.card{
+    display:block; background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:20px; margin-bottom:16px; text-decoration:none; color:var(--text);
+    transition:border-color 0.15s;
+  }
+  a.card:hover{border-color:var(--accent);}
+  a.card .t{font-weight:600; font-size:1.05rem; margin-bottom:4px;}
+  a.card .d{color:var(--muted); font-size:0.85rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>StudentHub</h1>
+  <div class="sub">Weekly progress tracking</div>
+
+  <!-- Student side: login, submit and edit weekly updates -->
+  <a class="card" href="student.html">
+    <div class="t">Student →</div>
+    <div class="d">Submit your weekly update</div>
+  </a>
+
+  <!-- Admin side: review the whole cohort (access is enforced by Supabase, not by this link) -->
+  <a class="card" href="admin.html">
+    <div class="t">Admin →</div>
+    <div class="d">Review cohort progress</div>
+  </a>
+</div>
+</body>
+</html>

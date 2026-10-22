@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<!-- StudentHub Learning Progress Dashboard - student page. -->
+<!-- Students log in, submit a Technical Learning or Role Development update for the current week, -->
+<!-- edit this week's updates, and read back their previous submissions. -->
+<!-- Depends on: Supabase JS (CDN), tables students + submissions, Storage bucket "evidence". -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StudentHub — Weekly Update</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  /* Design tokens (dark theme). Same values are used in index.html and admin.html. */
+  :root{
+    --bg:#0f1115; --panel:#171a21; --border:#2a2e38; --text:#e8e9ec;
+    --muted:#8b8f9a; --accent:#5b8def; --good:#3fb27f; --warn:#e0a839; --danger:#e05a5a;
+    --tech:#5b8def; --role:#c084fc;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh;}
+  .wrap{max-width:640px; margin:0 auto; padding:32px 20px 80px;}
+  h1{font-size:1.4rem; margin:0 0 4px;}
+  .sub{color:var(--muted); font-size:0.9rem; margin-bottom:28px;}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:20px;}
+  label{display:block; font-size:0.85rem; color:var(--muted); margin:16px 0 6px;}
+  label:first-child{margin-top:0;}
+  input, textarea, select{width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:#0f1115; color:var(--text); font-size:0.95rem; font-family:inherit;}
+  textarea{resize:vertical; min-height:70px;}
+  input::placeholder, textarea::placeholder{color:#5c606b;}
+  input:focus, textarea:focus, select:focus{outline:none; border-color:var(--accent);}
+  button{padding:12px; border:none; border-radius:8px; background:var(--accent); color:white; font-size:0.95rem; font-weight:600; cursor:pointer;}
+  button:hover{opacity:0.9;}
+  button:disabled{opacity:0.5; cursor:not-allowed;}
+  button.full{width:100%; margin-top:20px;}
+  button.secondary{background:none; border:1px solid var(--border); color:var(--muted);}
+  button.small{padding:5px 12px; font-size:0.8rem;}
+  /* Technical / Role buttons; the inactive one is dimmed */
+  .type-picker{display:flex; gap:12px;}
+  .type-picker button{flex:1; padding:14px; opacity:0.55;}
+  .type-picker button.active{opacity:1;}
+  .btn-tech{background:var(--tech);}
+  .btn-role{background:var(--role);}
+  .badge{display:inline-block; padding:3px 10px; border-radius:20px; font-size:0.75rem; font-weight:600;}
+  .badge-tech{background:rgba(91,141,239,0.15); color:var(--tech);}
+  .badge-role{background:rgba(192,132,252,0.15); color:var(--role);}
+  .msg{padding:12px; border-radius:8px; margin-bottom:16px; font-size:0.9rem;}
+  .msg.error{background:rgba(224,90,90,0.12); color:var(--danger); border:1px solid rgba(224,90,90,0.3);}
+  .msg.ok{background:rgba(63,178,127,0.12); color:var(--good); border:1px solid rgba(63,178,127,0.3);}
+  .hidden{display:none !important;}
+  /* Update lists use native <details>/<summary>, so expand and collapse needs no JavaScript */
+  details{border-top:1px solid var(--border); padding:12px 0; font-size:0.9rem;}
+  details:first-of-type{border-top:none; padding-top:0;}
+  summary{cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:10px; list-style:none;}
+  summary::-webkit-details-marker{display:none;}
+  summary .t{font-weight:600;}
+  .detail{margin-top:12px; font-size:0.85rem; display:grid; gap:10px;}
+  .detail .k{color:var(--muted); font-size:0.78rem; margin-bottom:2px;}
+  .detail .v{white-space:pre-wrap; word-break:break-word;}
+  a{color:var(--accent);}
+  .logout{background:none; border:1px solid var(--border); color:var(--muted); width:auto; padding:6px 14px; font-size:0.8rem; font-weight:500;}
+  .top-row{display:flex; justify-content:space-between; align-items:flex-start;}
+  .close-form{text-align:right; margin-top:10px;}
+  /* One row in the evidence lists (a link input, a file input, or an already-saved file) */
+  .ev-row{display:flex; gap:8px; margin-bottom:8px; align-items:center;}
+  .ev-row input{flex:1;}
+  .ev-row .name{flex:1; font-size:0.85rem; word-break:break-all;}
+  .ev-row button{padding:6px 10px; font-size:0.8rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Login screen - hidden after a successful sign-in -->
+  <div id="loginView">
+    <h1>StudentHub</h1>
+    <div class="sub">Weekly progress check-in</div>
+    <div class="card">
+      <div id="loginMsg"></div>
+      <label>Email</label>
+      <input type="email" id="loginEmail" autocomplete="username">
+      <label>Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password">
+      <button class="full" id="loginBtn">Log in</button>
+    </div>
+  </div>
+
+  <!-- Main student view - hidden until signed in -->
+  <div id="appView" class="hidden">
+    <div class="top-row">
+      <div>
+        <h1 id="welcomeName">Welcome</h1>
+        <div class="sub" id="pathwayLine"></div>
+      </div>
+      <button class="logout" id="logoutBtn">Log out</button>
+    </div>
+
+    <div class="card">
+      <label style="margin-top:0;">Current reporting week</label>
+      <div id="weekLine"></div>
+    </div>
+
+    <!-- Short success message after submit or save -->
+    <div id="flash"></div>
+
+    <!-- Choose which type of update to add -->
+    <div class="card" id="pickerCard">
+      <label style="margin-top:0;">Add weekly update</label>
+      <div class="type-picker">
+        <button class="btn-tech" id="btnAddTech">+ Technical Learning</button>
+        <button class="btn-role" id="btnAddRole">+ Role Development</button>
+      </div>
+    </div>
+
+    <!-- Update form. Both forms (t = technical, r = role) are built by JavaScript and stay in the page, -->
+    <!-- so what is typed in one is kept while the other is open. -->
+    <div class="card hidden" id="formCard">
+      <div id="formMsg"></div>
+      <div id="formTitle" style="font-weight:600; margin-bottom:14px;"></div>
+      <div id="form-t" class="hidden"></div>
+      <div id="form-r" class="hidden"></div>
+    </div>
+
+    <div class="card">
+      <!-- Updates for the current week (editable) -->
+      <label style="margin-top:0;">This week's updates</label>
+      <div id="thisWeekUpdates"><div class="sub">No updates yet this week.</div></div>
+    </div>
+
+    <div class="card">
+      <!-- Updates from earlier weeks (read only) -->
+      <label style="margin-top:0;">Previous submissions</label>
+      <div id="history"><div class="sub">No submissions yet.</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Dropdown options. Change these when the cohort moves on to new subjects or roles.
+// "Other..." is always offered, so a student is never blocked by a missing option.
+// ---- Edit these lists when the cohort moves on ----
+const TECH_SUBJECTS = ['HTML & CSS', 'JavaScript', 'SQL', 'Python', 'Java', 'React'];
+const ROLES = ['Software Developer', 'Systems Analyst / Product', 'Multimedia / UI-UX', 'Data Comms & Networking', 'QA Tester', 'Automation & Integration'];
+// ---------------------------------------------------
+
+// Supabase project URL and anon key. The anon key is public by design: it only
+// allows what the Row Level Security policies allow. Never put the service_role key here.
+const SUPABASE_URL = "https://kfbxkikkoybtufdqunsr.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmYnhraWtrb3lidHVmZHF1bnNyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxOTQ4MzUsImV4cCI6MjEwMzc3MDgzNX0.pdXedfaEyYS8U_EgMUIgmhWBdcx3i4qHShEnnayEwpE";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Shortcut for getElementById, and the page state.
+// "p" is a form prefix used everywhere below: "t" = technical form, "r" = role form.
+const $ = id => document.getElementById(id);
+const TYPE = { t:'technical', r:'role' };
+// currentStudent: the logged-in student row. editing: id of the submission being edited per form.
+// dirty: whether a form has unsaved typing. subs: all of this student's submissions.
+let currentStudent = null;
+let editing = { t:null, r:null };
+let dirty = { t:false, r:false };
+let subs = [];
+
+// Returns the Monday of the current week as YYYY-MM-DD.
+// Built from local date parts on purpose: toISOString() converts to UTC and shifts
+// the date back a day in South Africa (UTC+2), which previously saved Sundays.
+function getWeekStart(){
+  const d = new Date();
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+// Date helpers: parse a YYYY-MM-DD string as a local date, and format a week as
+// "Monday 5 October - Sunday 11 October" (long) or "5 Oct - 11 Oct" (short).
+function parseD(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function fmtD(d, long){ return d.toLocaleDateString('en-GB', long ? {weekday:'long', day:'numeric', month:'long'} : {day:'numeric', month:'short'}); }
+function weekRange(ws, long = true){ const a = parseD(ws), b = new Date(a); b.setDate(a.getDate()+6); return fmtD(a,long) + ' – ' + fmtD(b,long); }
+// Escapes user-entered text before it goes into innerHTML (prevents script injection)
+function esc(str){
+  if (!str) return '';
+  return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function short(s, n = 60){ s = s || ''; return s.length > n ? s.slice(0, n) + '…' : s; }
+
+// The two forms share one template; only the labels, dropdown list and topic input differ.
+// ---------- form building ----------
+function formHtml(p){
+  const tech = p === 't';
+  return `
+    <label>${tech ? 'Technical Learning' : 'Professional Role'}</label>
+    <select id="${p}Subject"><option value="">Select…</option>${(tech ? TECH_SUBJECTS : ROLES).map(o => `<option>${esc(o)}</option>`).join('')}<option value="__other">Other…</option></select>
+    <input type="text" id="${p}Other" class="hidden" style="margin-top:8px" placeholder="Type it here">
+    <label>${tech ? 'Topic(s) / Module(s)' : 'Role Development Area'}</label>
+    ${tech
+      ? `<input type="text" id="${p}Topic" placeholder="e.g. Arrays to Functions (from topic to topic)">`
+      : `<textarea id="${p}Topic" placeholder="e.g. Writing test cases, logging bugs, working with the dev team"></textarea>`}
+    <label>Evidence — links</label>
+    <div id="${p}Links"></div>
+    <button type="button" class="secondary small" data-add="link" data-p="${p}">+ Add another link</button>
+    <label>Evidence — files</label>
+    <div id="${p}Files"></div>
+    <button type="button" class="secondary small" data-add="file" data-p="${p}">+ Add another file</button>
+    <label>Challenges / blockers</label>
+    <textarea id="${p}Challenges" placeholder="Optional"></textarea>
+    <label>Support needed</label>
+    <textarea id="${p}Support" placeholder="Optional"></textarea>
+    <label>Notes / feedback</label>
+    <textarea id="${p}Notes" placeholder="Anything else you want to tell us, or feedback for us"></textarea>
+    <button class="full" data-submit="${p}">Submit update</button>
+    <div class="close-form"><button class="secondary" data-cancel="${p}">Cancel</button></div>`;
+}
+// Build both forms once up front so drafts survive switching between them
+$('form-t').innerHTML = formHtml('t');
+$('form-r').innerHTML = formHtml('r');
+
+// Evidence rows. A student can add as many link and file rows as they need.
+function addLink(p, val = ''){
+  const row = document.createElement('div');
+  row.className = 'ev-row';
+  row.innerHTML = `<input type="url" placeholder="https:// (GitHub, Drive, deployed project, Figma, etc.)"><button type="button" class="secondary" data-rm>✕</button>`;
+  row.querySelector('input').value = val;
+  $(p + 'Links').appendChild(row);
+}
+function addFile(p){
+  const row = document.createElement('div');
+  row.className = 'ev-row';
+  row.innerHTML = `<input type="file"><button type="button" class="secondary" data-rm>✕</button>`;
+  $(p + 'Files').appendChild(row);
+}
+// A file saved on an earlier submit: shown by name and removable, but not re-uploaded
+function addKept(p, item){
+  const row = document.createElement('div');
+  row.className = 'ev-row keep';
+  row.dataset.url = item.url; row.dataset.name = item.name || '';
+  row.innerHTML = `<div class="name">${esc(item.name || item.url)}</div><button type="button" class="secondary" data-rm>✕</button>`;
+  $(p + 'Files').appendChild(row);
+}
+// Evidence list for a submission. Falls back to the old single evidence_link column
+// so submissions made before multi-evidence still open correctly.
+function getItems(s){
+  if (s.evidence_items && s.evidence_items.length) return s.evidence_items;
+  return s.evidence_link ? [{ type:'link', url:s.evidence_link, name:s.evidence_link }] : [];
+}
+
+// Clears one form back to its empty state (leaves the other form alone)
+function resetForm(p){
+  ['Subject','Other','Topic','Challenges','Support','Notes'].forEach(k => $(p + k).value = '');
+  $(p + 'Other').classList.add('hidden');
+  $(p + 'Links').innerHTML = ''; $(p + 'Files').innerHTML = '';
+  addLink(p); addFile(p);
+  editing[p] = null; dirty[p] = false;
+  document.querySelector(`[data-submit="${p}"]`).textContent = 'Submit update';
+}
+
+// Selects the dropdown value, or switches to "Other..." for a value that is not in the list
+function setSubject(p, v){
+  const list = p === 't' ? TECH_SUBJECTS : ROLES;
+  if (!v || list.includes(v)){ $(p + 'Subject').value = v || ''; }
+  else { $(p + 'Subject').value = '__other'; $(p + 'Other').value = v; $(p + 'Other').classList.remove('hidden'); }
+}
+
+// Shows one form. With an existing submission it fills the form for editing.
+// Asks before overwriting typing that has not been saved.
+function openForm(p, existing){
+  if (existing){
+    if (dirty[p] && !confirm('Replace what you have typed in this form with the update you are editing?')) return;
+    resetForm(p);
+    editing[p] = existing.id;
+    setSubject(p, existing.main_subject);
+    $(p + 'Topic').value = existing.topic_area || '';
+    $(p + 'Challenges').value = existing.challenges || '';
+    $(p + 'Support').value = existing.support_needed || '';
+    $(p + 'Notes').value = existing.notes || '';
+    const items = getItems(existing);
+    if (items.some(i => i.type !== 'file')){ $(p + 'Links').innerHTML = ''; }
+    items.filter(i => i.type !== 'file').forEach(i => addLink(p, i.url));
+    if (items.some(i => i.type === 'file')){ $(p + 'Files').innerHTML = ''; }
+    items.filter(i => i.type === 'file').forEach(i => addKept(p, i));
+    addFile(p);
+    document.querySelector(`[data-submit="${p}"]`).textContent = 'Save changes';
+    dirty[p] = false;
+  }
+  $('formMsg').innerHTML = '';
+  $('formCard').classList.remove('hidden');
+  ['t','r'].forEach(k => $('form-' + k).classList.toggle('hidden', k !== p));
+  $('btnAddTech').classList.toggle('active', p === 't');
+  $('btnAddRole').classList.toggle('active', p === 'r');
+  $('formTitle').innerHTML = (editing[p] ? 'Edit update — ' : '') + (p === 't'
+    ? '<span class="badge badge-tech">Technical Learning</span>'
+    : '<span class="badge badge-role">Role Development</span>');
+  $('formCard').scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+function closeForm(){
+  $('formCard').classList.add('hidden');
+  $('btnAddTech').classList.remove('active');
+  $('btnAddRole').classList.remove('active');
+}
+
+// Opening a form never clears it, so unsaved work is still there when you switch back
+$('btnAddTech').onclick = () => openForm('t');
+$('btnAddRole').onclick = () => openForm('r');
+
+// One click handler for the whole card (event delegation) because the evidence rows are
+// created and removed dynamically.
+$('formCard').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.hasAttribute('data-rm')){ b.closest('.ev-row').remove(); dirty[b.closest('[id^="form-"]').id.slice(-1)] = true; }
+  else if (b.dataset.add){ (b.dataset.add === 'link' ? addLink : addFile)(b.dataset.p); }
+  else if (b.dataset.cancel){ resetForm(b.dataset.cancel); closeForm(); }
+  else if (b.dataset.submit){ submitForm(b.dataset.submit, b); }
+});
+// Mark a form dirty on any typing, and show the "Other" box when "Other..." is chosen
+$('formCard').addEventListener('input', e => {
+  const p = e.target.closest('[id^="form-"]').id.slice(-1);
+  dirty[p] = true;
+});
+$('formCard').addEventListener('change', e => {
+  const p = e.target.closest('[id^="form-"]').id.slice(-1);
+  dirty[p] = true;
+  if (e.target.id === p + 'Subject') $(p + 'Other').classList.toggle('hidden', e.target.value !== '__other');
+});
+
+// Save flow: upload new files, build the payload, then insert (new) or update (edit).
+// ---------- submit ----------
+async function submitForm(p, btn){
+  const msg = $('formMsg');
+  msg.innerHTML = '';
+  const label = editing[p] ? 'Save changes' : 'Submit update';
+  btn.disabled = true; btn.textContent = 'Saving...';
+
+  // Collect evidence: typed links, files kept from before, then newly uploaded files below
+  const items = [];
+  $(p + 'Links').querySelectorAll('input').forEach(i => {
+    const v = i.value.trim();
+    if (v) items.push({ type:'link', url:v, name:v });
+  });
+  $(p + 'Files').querySelectorAll('.keep').forEach(r => items.push({ type:'file', url:r.dataset.url, name:r.dataset.name }));
+
+  // Upload each new file to the "evidence" bucket under the student's own folder
+  // (the storage policy only allows writes to a folder named after the user id).
+  // File names are cleaned because Storage rejects some characters.
+  for (const input of $(p + 'Files').querySelectorAll('input[type=file]')){
+    const file = input.files[0];
+    if (!file) continue;
+    const path = `${currentStudent.id}/${Date.now()}_${file.name.replace(/[^\w.\-]/g, '_')}`;
+    const { error: upErr } = await sb.storage.from('evidence').upload(path, file);
+    if (upErr){
+      msg.innerHTML = `<div class="msg error">File upload failed (${esc(file.name)}): ${esc(upErr.message)}</div>`;
+      btn.disabled = false; btn.textContent = label;
+      return;
+    }
+    items.push({ type:'file', url:sb.storage.from('evidence').getPublicUrl(path).data.publicUrl, name:file.name });
+  }
+
+  // No field is required, so an update can be saved with any fields empty and finished later
+  const subj = $(p + 'Subject').value;
+  // Columns progress and next_focus are no longer collected; evidence_link is blanked because
+  // links now live in evidence_items.
+  const payload = {
+    student_id: currentStudent.id,
+    week_start: getWeekStart(),
+    update_type: TYPE[p],
+    main_subject: subj === '__other' ? $(p + 'Other').value.trim() : subj,
+    topic_area: $(p + 'Topic').value.trim(),
+    evidence_items: items,
+    evidence_link: '',
+    challenges: $(p + 'Challenges').value.trim(),
+    support_needed: $(p + 'Support').value.trim(),
+    notes: $(p + 'Notes').value.trim(),
+  };
+
+  // Editing updates the existing row; otherwise a new row is inserted
+  const wasEditing = !!editing[p];
+  const { error } = wasEditing
+    ? await sb.from('submissions').update(payload).eq('id', editing[p])
+    : await sb.from('submissions').insert(payload);
+
+  btn.disabled = false; btn.textContent = label;
+  if (error){ msg.innerHTML = `<div class="msg error">${esc(error.message)}</div>`; return; }
+
+  resetForm(p);
+  closeForm();
+  $('flash').innerHTML = `<div class="msg ok">${wasEditing ? 'Changes saved ✓' : 'Update submitted ✓'}</div>`;
+  setTimeout(() => $('flash').innerHTML = '', 3000);
+  await loadHistory();
+}
+
+// Login, logout and loading the student profile
+// ---------- auth ----------
+async function init(){
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await loadApp(session.user);
+}
+
+$('loginBtn').onclick = async () => {
+  const msg = $('loginMsg');
+  msg.innerHTML = '';
+  const { data, error } = await sb.auth.signInWithPassword({ email: $('loginEmail').value.trim(), password: $('loginPassword').value });
+  if (error){ msg.innerHTML = `<div class="msg error">${esc(error.message)}</div>`; return; }
+  await loadApp(data.user);
+};
+
+// Sign out and return to the landing page so the user can pick a side again
+$('logoutBtn').onclick = async () => {
+  await sb.auth.signOut();
+  location.href = 'index.html';
+};
+
+// The students row id must equal the Supabase Auth user id. If it is missing, an admin
+// has not finished creating this account.
+async function loadApp(user){
+  const { data: student, error } = await sb.from('students').select('*').eq('id', user.id).single();
+  if (error || !student){
+    $('loginMsg').innerHTML = `<div class="msg error">No student profile found for this account. Contact your admin.</div>`;
+    return;
+  }
+  currentStudent = student;
+  $('loginView').classList.add('hidden');
+  $('appView').classList.remove('hidden');
+  $('welcomeName').textContent = `Hi, ${student.full_name.split(' ')[0]}`;
+  $('pathwayLine').textContent = 'Student Pathway: ' + student.pathway;
+  $('weekLine').textContent = weekRange(getWeekStart());
+  resetForm('t'); resetForm('r');
+  await loadHistory();
+}
+
+// Rendering of this week's updates and the history
+// ---------- lists ----------
+function badge(s){
+  return s.update_type === 'technical'
+    ? '<span class="badge badge-tech">Technical</span>'
+    : '<span class="badge badge-role">Role</span>';
+}
+
+// Full detail of one submission, shown when its <details> row is expanded
+function detailHtml(s){
+  const tech = s.update_type === 'technical';
+  // Only http(s) URLs become links, so a stored javascript: link can never run
+  const links = getItems(s).map(i => {
+    const u = /^https?:\/\//i.test(i.url) ? i.url : '#';
+    return `<div><a href="${esc(u)}" target="_blank" rel="noopener">${esc(i.name || i.url)} ↗</a></div>`;
+  }).join('') || '—';
+  const row = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  return `<div class="detail">
+    ${row(tech ? 'Technical Learning' : 'Professional Role', esc(s.main_subject) || '—')}
+    ${row(tech ? 'Topic(s) / Module(s)' : 'Role Development Area', esc(s.topic_area) || '—')}
+    ${row('Evidence', links)}
+    ${row('Challenges / blockers', esc(s.challenges) || '—')}
+    ${row('Support needed', esc(s.support_needed) || '—')}
+    ${row('Notes / feedback', esc(s.notes) || '—')}
+  </div>`;
+}
+
+// Loads this student's submissions (RLS limits it to their own) and splits them into
+// this week (editable) and previous weeks (read only).
+async function loadHistory(){
+  const weekStart = getWeekStart();
+  const { data } = await sb.from('submissions').select('*').eq('student_id', currentStudent.id)
+    .order('week_start', { ascending:false }).order('submitted_at', { ascending:false });
+  subs = data || [];
+
+  const thisWeek = subs.filter(s => s.week_start === weekStart);
+  $('thisWeekUpdates').innerHTML = thisWeek.length
+    ? thisWeek.map(s => `<details><summary>
+        <div class="t">${badge(s)} ${esc(s.main_subject) || '—'} · ${esc(short(s.topic_area))}${s.flagged ? '<div style="color:var(--danger); font-size:0.78rem; font-weight:400;">🚩 Flagged for follow-up</div>' : ''}</div>
+        <button class="small secondary" onclick="event.preventDefault(); editUpdate('${s.id}')">Edit</button>
+      </summary>${detailHtml(s)}</details>`).join('')
+    : '<div class="sub">No updates yet this week.</div>';
+
+  const prev = subs.filter(s => s.week_start !== weekStart);
+  $('history').innerHTML = prev.length
+    ? prev.map(s => `<details><summary>
+        <div class="t">${badge(s)} ${esc(s.main_subject) || '—'} · ${esc(short(s.topic_area))}
+          <div style="color:var(--muted); font-size:0.78rem; font-weight:400;">${weekRange(s.week_start, false)}</div></div>
+        <span style="color:var(--muted);">▾</span>
+      </summary>${detailHtml(s)}</details>`).join('')
+    : '<div class="sub">No previous submissions yet.</div>';
+}
+
+// Called from the Edit button on a this-week update
+window.editUpdate = (id) => {
+  const s = subs.find(x => x.id === id);
+  if (s) openForm(s.update_type === 'technical' ? 't' : 'r', s);
+};
+
+// Start the page
+init();
+</script>
+</body>
+</html>

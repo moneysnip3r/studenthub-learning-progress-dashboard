@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<!-- StudentHub Learning Progress Dashboard - admin page. -->
+<!-- Shows every student update, with filters, an admin note and a flag per update. -->
+<!-- Who counts as an admin is decided by Row Level Security policies in Supabase, not by this page. -->
+<!-- Depends on: Supabase JS (CDN), tables students + submissions (see supabase/migrations). -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StudentHub — Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  /* Design tokens (dark theme). Same values are used in index.html and student.html. */
+  :root{
+    --bg:#0f1115; --panel:#171a21; --border:#2a2e38; --text:#e8e9ec;
+    --muted:#8b8f9a; --accent:#5b8def; --good:#3fb27f; --warn:#e0a839; --danger:#e05a5a;
+    --tech:#5b8def; --role:#c084fc;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--text); min-height:100vh;
+  }
+  .wrap{max-width:1000px; margin:0 auto; padding:32px 20px 80px;}
+  h1{font-size:1.4rem; margin:0 0 4px;}
+  .sub{color:var(--muted); font-size:0.9rem; margin-bottom:24px;}
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:24px; margin-bottom:20px;
+  }
+  label{display:block; font-size:0.85rem; color:var(--muted); margin:16px 0 6px;}
+  label:first-child{margin-top:0;}
+  input, textarea{
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border);
+    background:#0f1115; color:var(--text); font-size:0.95rem; font-family:inherit;
+  }
+  textarea{resize:vertical; min-height:60px;}
+  input:focus, textarea:focus{outline:none; border-color:var(--accent);}
+  button{
+    padding:10px 16px; border:none; border-radius:8px; background:var(--accent);
+    color:white; font-size:0.9rem; font-weight:600; cursor:pointer;
+  }
+  button:hover{opacity:0.9;}
+  button.secondary{background:none; border:1px solid var(--border); color:var(--muted);}
+  button.danger{background:var(--danger);}
+  .hidden{display:none !important;}
+  .msg{padding:12px; border-radius:8px; margin-bottom:16px; font-size:0.9rem;}
+  .msg.error{background:rgba(224,90,90,0.12); color:var(--danger); border:1px solid rgba(224,90,90,0.3);}
+  table{width:100%; border-collapse:collapse; font-size:0.88rem;}
+  th{
+    text-align:left; padding:10px 8px; color:var(--muted); font-weight:600;
+    border-bottom:1px solid var(--border); font-size:0.78rem; text-transform:uppercase; letter-spacing:0.03em;
+  }
+  td{padding:10px 8px; border-bottom:1px solid var(--border); vertical-align:top;}
+  tr.row{cursor:pointer;}
+  tr.row:hover{background:rgba(255,255,255,0.02);}
+  .badge{padding:3px 9px; border-radius:20px; font-size:0.75rem; font-weight:600; display:inline-block;}
+  .badge-yes{background:rgba(63,178,127,0.15); color:var(--good);}
+  .badge-no{background:rgba(224,168,57,0.15); color:var(--warn);}
+  .badge-flag{background:rgba(224,90,90,0.15); color:var(--danger);}
+  .badge-tech{background:rgba(91,141,239,0.15); color:var(--tech);}
+  .badge-role{background:rgba(192,132,252,0.15); color:var(--role);}
+  /* Detail row sits under each table row and is hidden until the row is clicked. */
+  .detail{display:none; background:#12141a; border-bottom:1px solid var(--border);}
+  .detail.open{display:table-row;}
+  .detail td{padding:20px;}
+  .detail-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px 24px; margin-bottom:16px; font-size:0.85rem;}
+  .detail-grid .k{color:var(--muted); margin-bottom:2px;}
+  .detail-grid .full{grid-column:1/-1; white-space:pre-wrap; word-break:break-word;}
+  .top-row{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
+  .logout{
+    background:none; border:1px solid var(--border); color:var(--muted);
+    padding:6px 14px; font-size:0.8rem; font-weight:500;
+  }
+  .summary{display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;}
+  .summary .stat{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:12px 18px; flex:1; min-width:120px;
+  }
+  .summary .stat .n{font-size:1.4rem; font-weight:700;}
+  .summary .stat .l{font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.03em;}
+  .filters{display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;}
+  .filters button{background:none; border:1px solid var(--border); color:var(--muted); padding:6px 14px; font-size:0.82rem;}
+  .filters button.active{background:var(--accent); color:white; border-color:var(--accent);}
+  a{color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Login screen - hidden after a successful sign-in -->
+  <div id="loginView">
+    <h1>StudentHub Admin</h1>
+    <div class="sub">Cohort overview</div>
+    <div class="card">
+      <div id="loginMsg"></div>
+      <label>Email</label>
+      <input type="email" id="loginEmail" autocomplete="username">
+      <label>Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password">
+      <button id="loginBtn">Log in</button>
+    </div>
+  </div>
+
+  <!-- Main admin view - hidden until signed in -->
+  <div id="appView" class="hidden">
+    <div class="top-row">
+      <div>
+        <h1>Cohort overview</h1>
+        <div class="sub" id="weekLine"></div>
+      </div>
+      <button class="logout" id="logoutBtn">Log out</button>
+    </div>
+
+    <!-- Summary stats are filled in by render() -->
+    <div class="summary" id="summary"></div>
+
+    <!-- Filter buttons: all updates / Technical Learning / Role Development -->
+    <div class="filters" id="filters">
+      <button data-f="all" class="active">All updates</button>
+      <button data-f="technical">Technical Learning</button>
+      <button data-f="role">Role Development</button>
+    </div>
+
+    <!-- Table of updates; rows are added by render() -->
+    <div class="card" style="padding:0; overflow-x:auto;">
+      <table id="table">
+        <thead>
+          <tr>
+            <th>Student</th>
+            <th>Pathway</th>
+            <th>Week</th>
+            <th>Type</th>
+            <th>Subject / Role</th>
+            <th>Topic / Area</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Supabase project URL and anon key. The anon key is public by design: it only
+// allows what the Row Level Security policies allow. Never put the service_role key here.
+const SUPABASE_URL = "https://kfbxkikkoybtufdqunsr.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtmYnhraWtrb3lidHVmZHF1bnNyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgxOTQ4MzUsImV4cCI6MjEwMzc3MDgzNX0.pdXedfaEyYS8U_EgMUIgmhWBdcx3i4qHShEnnayEwpE";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// The two top-level views, toggled with the "hidden" class
+const loginView = document.getElementById('loginView');
+const appView = document.getElementById('appView');
+
+// Returns the Monday of the current week as YYYY-MM-DD.
+// Built from local date parts on purpose: toISOString() converts to UTC and shifts
+// the date back a day in South Africa (UTC+2), which previously saved Sundays.
+function getWeekStart(){
+  const d = new Date();
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+// Turns a Monday date into a label like "Monday 5 October - Sunday 11 October"
+function weekRange(ws, long = true){
+  const [y,m,d] = ws.split('-').map(Number);
+  const a = new Date(y, m-1, d), b = new Date(a); b.setDate(a.getDate()+6);
+  const f = x => x.toLocaleDateString('en-GB', long ? {weekday:'long', day:'numeric', month:'long'} : {day:'numeric', month:'short'});
+  return f(a) + ' – ' + f(b);
+}
+// Builds the evidence links for an update. Reads the new evidence_items list and falls back
+// to the old single evidence_link column so earlier submissions still display.
+// Only http(s) URLs become links, so a student cannot store a javascript: link.
+function evidenceHtml(sub){
+  const items = (sub.evidence_items && sub.evidence_items.length) ? sub.evidence_items
+    : (sub.evidence_link ? [{ url: sub.evidence_link, name: 'Open link' }] : []);
+  return items.map(i => {
+    const u = /^https?:\/\//i.test(i.url) ? i.url : '#';
+    return `<div><a href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(i.name || i.url)} ↗</a></div>`;
+  }).join('') || '—';
+}
+
+// Escapes user-entered text before it goes into innerHTML (prevents script injection)
+function escapeHtml(str){
+  if (!str) return '';
+  return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// On page load, skip the login form if a session already exists
+async function init(){
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await loadApp();
+}
+
+// Email/password login through Supabase Auth
+document.getElementById('loginBtn').onclick = async () => {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const msg = document.getElementById('loginMsg');
+  msg.innerHTML = '';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error){
+    msg.innerHTML = `<div class="msg error">${error.message}</div>`;
+    return;
+  }
+  await loadApp();
+};
+
+// Sign out and return to the landing page so the user can pick a side again
+document.getElementById('logoutBtn').onclick = async () => {
+  await sb.auth.signOut();
+  location.href = 'index.html';
+};
+
+// Page state: active students, all submissions, a lookup by student id, and the active filter
+let students = [];
+let allSubs = [];
+let studentsById = {};
+let currentFilter = 'all';
+
+// Filter buttons re-render the table without reloading data
+document.querySelectorAll('#filters button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('#filters button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.f;
+    render();
+  };
+});
+
+// Loads students and submissions, then renders. Any signed-in user can reach this page, but
+// the RLS policies only return rows to admin emails, so non-admins simply see nothing.
+async function loadApp(){
+  loginView.classList.add('hidden');
+  appView.classList.remove('hidden');
+
+  const weekStart = getWeekStart();
+  document.getElementById('weekLine').textContent = `Current reporting week: ${weekRange(weekStart)}`;
+
+  const { data: studentData, error: sErr } = await sb.from('students').select('*').eq('active', true).order('full_name');
+  if (sErr){
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="6">Error loading students: ${sErr.message}</td></tr>`;
+    return;
+  }
+  students = studentData || [];
+  studentsById = {};
+  students.forEach(s => studentsById[s.id] = s);
+
+  const { data: subData, error: subErr } = await sb.from('submissions').select('*').order('week_start', { ascending: false }).order('submitted_at', { ascending: false });
+  if (subErr){
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="6">Error loading submissions: ${subErr.message}</td></tr>`;
+    return;
+  }
+  allSubs = subData || [];
+
+  render();
+}
+
+function render(){
+  const weekStart = getWeekStart();
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+
+  // A student counts as "submitted" if they have at least one update this week
+  const submittedThisWeek = new Set();
+  allSubs.filter(s => s.week_start === weekStart).forEach(s => submittedThisWeek.add(s.student_id));
+  const flaggedCount = allSubs.filter(s => s.flagged).length;
+
+  document.getElementById('summary').innerHTML = `
+    <div class="stat"><div class="n">${students.length}</div><div class="l">Total active</div></div>
+    <div class="stat"><div class="n">${submittedThisWeek.size}</div><div class="l">Submitted this week</div></div>
+    <div class="stat"><div class="n">${students.length - submittedThisWeek.size}</div><div class="l">Not submitted</div></div>
+    <div class="stat"><div class="n">${flaggedCount}</div><div class="l">Flagged</div></div>
+  `;
+
+  const visible = currentFilter === 'all' ? allSubs : allSubs.filter(s => s.update_type === currentFilter);
+
+  if (visible.length === 0){
+    tbody.innerHTML = '<tr><td colspan="6">No updates found.</td></tr>';
+    return;
+  }
+
+  visible.forEach(sub => {
+    const student = studentsById[sub.student_id];
+    if (!student) return;
+
+    const typeBadge = sub.update_type === 'technical'
+      ? '<span class="badge badge-tech">Technical Learning</span>'
+      : '<span class="badge badge-role">Role Development</span>';
+
+    const row = document.createElement('tr');
+    row.className = 'row';
+    row.innerHTML = `
+      <td>${escapeHtml(student.full_name)}</td>
+      <td>${escapeHtml(student.pathway)}</td>
+      <td>${weekRange(sub.week_start, false)} ${sub.flagged ? '🚩' : ''}</td>
+      <td>${typeBadge}</td>
+      <td>${escapeHtml(sub.main_subject)}</td>
+      <td>${escapeHtml(sub.topic_area)}</td>
+    `;
+
+    const detail = document.createElement('tr');
+    detail.className = 'detail';
+    detail.innerHTML = `<td colspan="6">${renderDetail(sub, student)}</td>`;
+
+    row.onclick = () => detail.classList.toggle('open');
+
+    tbody.appendChild(row);
+    tbody.appendChild(detail);
+  });
+}
+
+// Expanded view of one update, plus the admin-only note and flag controls
+function renderDetail(sub, student){
+  const id = sub.id;
+  const isTech = sub.update_type === 'technical';
+  return `
+    <div class="detail-grid">
+      <div><div class="k">Student</div>${escapeHtml(student.full_name)}</div>
+      <div><div class="k">Reporting week</div>${weekRange(sub.week_start)}</div>
+      <div><div class="k">${isTech ? 'Technical Learning' : 'Professional Role'}</div>${escapeHtml(sub.main_subject)}</div>
+      <div><div class="k">${isTech ? 'Topic(s) / Module(s)' : 'Role Development Area'}</div>${escapeHtml(sub.topic_area)}</div>
+      <div><div class="k">Update type</div>${isTech ? 'Technical Learning' : 'Role Development'}</div>
+      <div class="full"><div class="k">Evidence</div>${evidenceHtml(sub)}</div>
+      <div class="full"><div class="k">Challenges / blockers</div>${escapeHtml(sub.challenges) || '—'}</div>
+      <div class="full"><div class="k">Support needed</div>${escapeHtml(sub.support_needed) || '—'}</div>
+      <div class="full"><div class="k">Notes / feedback</div>${escapeHtml(sub.notes) || '—'}</div>
+    </div>
+    <label>Admin note</label>
+    <textarea id="note-${id}">${escapeHtml(sub.admin_note || '')}</textarea>
+    <div style="display:flex; gap:10px; margin-top:12px; align-items:center;">
+      <button onclick="saveNote('${id}')">Save note</button>
+      <button class="${sub.flagged ? 'secondary' : 'danger'}" onclick="toggleFlag('${id}', ${!sub.flagged})">${sub.flagged ? 'Remove flag' : 'Flag student'}</button>
+      <span id="save-msg-${id}" style="font-size:0.85rem;"></span>
+    </div>
+  `;
+}
+
+// Saves the admin note. Attached to window because it is called from inline onclick handlers.
+window.saveNote = async (id) => {
+  const val = document.getElementById(`note-${id}`).value;
+  const { error } = await sb.from('submissions').update({ admin_note: val }).eq('id', id);
+  const msgEl = document.getElementById(`save-msg-${id}`);
+  msgEl.textContent = error ? 'Error saving' : 'Saved ✓';
+  msgEl.style.color = error ? 'var(--danger)' : 'var(--good)';
+  setTimeout(() => msgEl.textContent = '', 2000);
+};
+
+// Flags or unflags an update, then reloads so the stats and flag icon refresh
+window.toggleFlag = async (id, newVal) => {
+  await sb.from('submissions').update({ flagged: newVal }).eq('id', id);
+  await loadApp();
+};
+
+// Start the page
+init();
+</script>
+</body>
+</html>

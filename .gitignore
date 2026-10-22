@@ -1,0 +1,17 @@
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Editor settings
+.vscode/
+.idea/
+
+# Environment files and secrets.
+# This project has no build step and needs no .env, but never commit one.
+# Never commit the Supabase service_role key.
+.env
+.env.*
+
+# Dependencies and logs (in case tooling is added later)
+node_modules/
+*.log
